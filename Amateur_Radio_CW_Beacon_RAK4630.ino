@@ -19,7 +19,7 @@
 #define ENABLE_GPS 1 // Set to 1 to enable GPS, 0 to disable
 #define ENABLE_LCD 1 // Set to 1 to enable OLED, 0 to disable
 #define VBAT_PIN A0  // VBAT pin (P0.04 on RAK4630)
-#define VBAT_THRESHOLD 3.1 // Low battery threshold in volts (changed from 3.3)
+#define VBAT_THRESHOLD 3.1 // Low battery threshold in volts
 
 // SPI pins
 #define SPI_MOSI 44  // MOSI P1.12
@@ -103,7 +103,7 @@ const char* MORSE_STRING = "BBB DE 3Y0X/KE83";
 // Morse code lookup table (A-Z, 0-9, space, special characters)
 const char* morseCode[] = {
   ".-",     // A
-  "-...",   // B (corrected from ...- to -...)
+  "-...",   // B
   "-.-.",   // C
   "-..",    // D
   ".",      // E
