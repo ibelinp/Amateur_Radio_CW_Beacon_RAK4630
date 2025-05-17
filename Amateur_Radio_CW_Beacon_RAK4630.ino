@@ -17,6 +17,9 @@
 #include <TinyGPSPlus.h>
 
 #define ENABLE_GPS 1 // Set to 1 to enable GPS, 0 to disable
+#define ENABLE_LCD 1 // Set to 1 to enable OLED, 0 to disable
+#define VBAT_PIN A0  // VBAT pin (P0.04 on RAK4630)
+#define VBAT_THRESHOLD 3.3 // Low battery threshold in volts
 
 // SPI pins
 #define SPI_MOSI 44  // MOSI P1.12
@@ -61,16 +64,17 @@
 
 // CW Configuration Parameters
 #define TX_POWER            22      // dBm
-#define TX_STABILIZATION_DELAY 10   // ms
-#define WPM                 25      // Words per minute
+#define TX_STABILIZATION_DELAY 10   // ms (changed from 25)
+#define WPM                 25      // Words per minute (changed from 20)
 #define UNIT_TIME           (1200 / WPM) // ms
 
 // OLED Configuration
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_ADDRESS 0x3C  // Common I2C address for 0.96" OLED
+#ifdef ENABLE_LCD
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
-bool displayConnected = false;
+#endif
 
 // GPS Configuration
 #ifdef ENABLE_GPS
@@ -85,7 +89,7 @@ bool ledState = false; // Tracks LED state for toggling
 // Create SPI instance for SX1262 using SPIM2
 SPIClass SX1262_SPI(NRF_SPIM2, SPI_MISO, SPI_SCK, SPI_MOSI);
 
-// Frequency list (in Hz)
+// Frequency list (in Hz) - add as many frequencies as needed, but SX1262 matching network will limit output power
 const uint64_t FREQUENCIES[] = {
   1296200000ULL,  // 1296.2 MHz, 23cm amateur band, primary beacon frequency
   903300000ULL    // 903.3 MHz, 33cm amateur band, secondary frequency for testing
@@ -94,7 +98,7 @@ const int NUM_FREQUENCIES = sizeof(FREQUENCIES) / sizeof(FREQUENCIES[0]);
 int currentFreqIndex = 0;
 
 // Hardcoded Morse string
-const char* MORSE_STRING = "BBB DE N4IP/EM73";
+const char* MORSE_STRING = "BBB DE 3Y0X/KE83"; // Changed from "BBB DE N4IP / TEST &"
 
 // Morse code lookup table (A-Z, 0-9, space, special characters)
 const char* morseCode[] = {
@@ -144,15 +148,13 @@ const char* morseCode[] = {
   "...-.-"  // SK (end of contact)
 };
 
-// 1PPS interrupt handler
 #ifdef ENABLE_GPS
+// 1PPS interrupt handler
 void ppsHandler() {
   ledState = !ledState; // Toggle LED state
   digitalWrite(GREEN_LED, ledState ? HIGH : LOW);
 }
-#endif
 
-#ifdef ENABLE_GPS
 // Calculate 6-digit Maidenhead grid square
 String calculateMaidenhead(double lat, double lon) {
   lon += 180.0;
@@ -196,6 +198,13 @@ int charToIndex(char c) {
   }
 }
 
+float readBatteryVoltage() {
+  int raw = analogRead(VBAT_PIN); // 0-1023 (10-bit ADC)
+  // Assuming 3.3V reference, VBAT divider (1/2), and 3.6V max
+  float voltage = (raw / 1023.0) * 3.3 * 2.0; // Adjust for divider
+  return voltage;
+}
+
 void writeRegister(uint8_t cmd, const uint8_t* data, uint8_t len) {
   digitalWrite(NSS, LOW);
   uint8_t response = SX1262_SPI.transfer(cmd);
@@ -218,12 +227,12 @@ void waitForBusy() {
   unsigned long timeout = millis() + 1000;
   while (digitalRead(BUSY) == HIGH) {
     if (millis() > timeout) {
-      if (displayConnected) {
-        display.clearDisplay();
-        display.setCursor(0, 0);
-        display.println("Error: BUSY stuck HIGH");
-        display.display();
-      }
+      #ifdef ENABLE_LCD
+      display.clearDisplay();
+      display.setCursor(0, 0);
+      display.println("Error: BUSY stuck HIGH");
+      display.display();
+      #endif
       digitalWrite(TX_BLUE_LED, LOW);
       while (true);
     }
@@ -267,10 +276,14 @@ void setup() {
   digitalWrite(GPS_POWER, LOW);
   #endif
 
+  // Initialize VBAT pin
+  pinMode(VBAT_PIN, INPUT);
+  analogReference(AR_DEFAULT); // 3.3V reference
+
   // Initialize I2C and OLED display
   Wire.begin(); // I2C1 on SDA (P0.13), SCL (P0.14)
+  #ifdef ENABLE_LCD
   if (display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
-    displayConnected = true;
     Serial.println("OLED display initialized");
     display.clearDisplay();
     display.setTextSize(1);
@@ -287,6 +300,9 @@ void setup() {
   } else {
     Serial.println("OLED display not detected");
   }
+  #else
+  Serial.println("OLED disabled");
+  #endif
 
   #ifdef ENABLE_GPS
   // Initialize UART1 for GPS
@@ -294,7 +310,7 @@ void setup() {
   gpsReceiving = false;
   while (millis() - start < GPS_TIMEOUT) {
     while (Serial1.available()) {
-      gpsReceiving = true; // Any data received
+      gpsReceiving = true;
       if (gps.encode(Serial1.read())) {
         if (gps.location.isValid()) {
           gpsConnected = true;
@@ -316,26 +332,33 @@ void setup() {
   }
   #endif
 
-  if (displayConnected) {
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    display.println("RAK4631 Beacon");
-    #ifdef ENABLE_GPS
-    if (gpsReceiving) {
-      display.println("GPS: Receiving");
-      if (gpsConnected) {
-        display.println("Fix: Valid");
-      } else {
-        display.println("Fix: None");
-      }
+  #ifdef ENABLE_LCD
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println("RAK4631 Beacon");
+  #ifdef ENABLE_GPS
+  if (gpsReceiving) {
+    display.println("GPS: Receiving");
+    if (gpsConnected) {
+      display.println("Fix: Valid");
     } else {
-      display.println("GPS: No data");
+      display.println("Fix: None");
     }
-    #else
-    display.println("GPS Disabled");
-    #endif
-    display.display();
+  } else {
+    display.println("GPS: No data");
   }
+  #else
+  display.println("GPS Disabled");
+  #endif
+  float vbat = readBatteryVoltage();
+  display.print("Batt: ");
+  display.print(vbat, 1);
+  display.println("V");
+  if (vbat < VBAT_THRESHOLD) {
+    display.println("LOW BATTERY!");
+  }
+  display.display();
+  #endif
 
   // Initialize SPI
   SX1262_SPI.begin();
@@ -411,6 +434,8 @@ void transmitMorse(const char* code) {
 }
 
 void sendMorseString(const char* str) {
+  float vbat = readBatteryVoltage(); // Declare vbat once at the start
+
   for (int i = 0; str[i] != '\0'; i++) {
     int index = charToIndex(str[i]);
     if (index >= 0) {
@@ -426,48 +451,54 @@ void sendMorseString(const char* str) {
   }
   Serial.println(" - Sent");
 
-  // Update OLED display if connected
-  if (displayConnected) {
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    display.print("Freq: ");
-    display.print((unsigned long)(FREQUENCIES[currentFreqIndex] / 1000000));
-    display.print(".");
-    display.print((unsigned long)(FREQUENCIES[currentFreqIndex] % 1000000) / 1000);
-    display.println(" MHz");
-    display.println("TX: BBB DE N4IP");
-    #ifdef ENABLE_GPS
-    if (gpsReceiving) {
-      display.print("Sats: ");
-      display.println(gps.satellites.isValid() ? gps.satellites.value() : 0);
-      if (gps.time.isValid()) {
-        display.print("UTC: ");
-        if (gps.time.hour() < 10) display.print("0");
-        display.print(gps.time.hour());
-        display.print(":");
-        if (gps.time.minute() < 10) display.print("0");
-        display.print(gps.time.minute());
-        display.print(":");
-        if (gps.time.second() < 10) display.print("0");
-        display.println(gps.time.second());
-      }
-      if (gpsConnected && gps.location.isValid()) {
-        String grid = calculateMaidenhead(gps.location.lat(), gps.location.lng());
-        display.print("Grid: ");
-        display.println(grid);
-      } else {
-        display.println("Fix: None");
-      }
-    } else {
-      display.println("GPS: No data");
+  // Update OLED display if enabled
+  #ifdef ENABLE_LCD
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.print("Freq: ");
+  display.print((unsigned long)(FREQUENCIES[currentFreqIndex] / 1000000));
+  display.print(".");
+  display.print((unsigned long)(FREQUENCIES[currentFreqIndex] % 1000000) / 1000);
+  display.println(" MHz");
+  display.println("TX: BBB DE 3Y0X/KE83"); // Updated Morse message
+  #ifdef ENABLE_GPS
+  if (gpsReceiving) {
+    display.print("Sats: ");
+    display.println(gps.satellites.isValid() ? gps.satellites.value() : 0);
+    if (gps.time.isValid()) {
+      display.print("UTC: ");
+      if (gps.time.hour() < 10) display.print("0");
+      display.print(gps.time.hour());
+      display.print(":");
+      if (gps.time.minute() < 10) display.print("0");
+      display.print(gps.time.minute());
+      display.print(":");
+      if (gps.time.second() < 10) display.print("0");
+      display.println(gps.time.second());
     }
-    #else
-    display.println("GPS Disabled");
-    #endif
-    display.display();
+    if (gpsConnected && gps.location.isValid()) {
+      String grid = calculateMaidenhead(gps.location.lat(), gps.location.lng());
+      display.print("Grid: ");
+      display.println(grid);
+    } else {
+      display.println("Fix: None");
+    }
+  } else {
+    display.println("GPS: No data");
   }
+  #else
+  display.println("GPS Disabled");
+  #endif
+  display.print("Batt: ");
+  display.print(vbat, 1);
+  display.println("V");
+  if (vbat < VBAT_THRESHOLD) {
+    display.println("LOW BATTERY!");
+  }
+  display.display();
+  #endif
 
-  // Update Serial with GPS status
+  // Update Serial with GPS and battery status
   #ifdef ENABLE_GPS
   Serial.println(gpsReceiving ? "GPS: Receiving" : "GPS: No data");
   if (gpsReceiving && gps.satellites.isValid()) {
@@ -499,6 +530,12 @@ void sendMorseString(const char* str) {
   #else
   Serial.println("GPS Disabled");
   #endif
+  Serial.print("Battery Voltage: ");
+  Serial.print(vbat, 1);
+  Serial.println("V");
+  if (vbat < VBAT_THRESHOLD) {
+    Serial.println("Warning: Low Battery!");
+  }
 }
 
 void loop() {
@@ -520,5 +557,5 @@ void loop() {
   sendMorseString(MORSE_STRING);
 
   currentFreqIndex = (currentFreqIndex + 1) % NUM_FREQUENCIES; // Move to next frequency
-  delay(500); // Pause between frequency changes
+  delay(1000); // Pause between frequency changes
 }
