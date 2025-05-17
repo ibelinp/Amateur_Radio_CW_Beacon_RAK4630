@@ -19,7 +19,7 @@
 #define ENABLE_GPS 1 // Set to 1 to enable GPS, 0 to disable
 #define ENABLE_LCD 1 // Set to 1 to enable OLED, 0 to disable
 #define VBAT_PIN A0  // VBAT pin (P0.04 on RAK4630)
-#define VBAT_THRESHOLD 3.3 // Low battery threshold in volts
+#define VBAT_THRESHOLD 3.1 // Low battery threshold in volts (changed from 3.3)
 
 // SPI pins
 #define SPI_MOSI 44  // MOSI P1.12
@@ -240,6 +240,54 @@ void waitForBusy() {
   }
 }
 
+#ifdef ENABLE_LCD
+void updateDisplay(float vbat) {
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.print("Freq: ");
+  display.print((unsigned long)(FREQUENCIES[currentFreqIndex] / 1000000));
+  display.print(".");
+  display.print((unsigned long)(FREQUENCIES[currentFreqIndex] % 1000000) / 1000);
+  display.println(" MHz");
+  display.println("TX: BBB DE 3Y0X/KE83");
+  #ifdef ENABLE_GPS
+  if (gpsReceiving) {
+    display.print("Sats: ");
+    display.println(gps.satellites.isValid() ? gps.satellites.value() : 0);
+    if (gps.time.isValid()) {
+      display.print("UTC: ");
+      if (gps.time.hour() < 10) display.print("0");
+      display.print(gps.time.hour());
+      display.print(":");
+      if (gps.time.minute() < 10) display.print("0");
+      display.print(gps.time.minute());
+      display.print(":");
+      if (gps.time.second() < 10) display.print("0");
+      display.println(gps.time.second());
+    }
+    if (gpsConnected && gps.location.isValid()) {
+      String grid = calculateMaidenhead(gps.location.lat(), gps.location.lng());
+      display.print("Grid: ");
+      display.println(grid);
+    } else {
+      display.println("Fix: None");
+    }
+  } else {
+    display.println("GPS: No data");
+  }
+  #else
+  display.println("GPS Disabled");
+  #endif
+  display.print("Batt: ");
+  display.print(vbat, 1);
+  display.println("V");
+  if (vbat < VBAT_THRESHOLD) {
+    display.println("LOW BATTERY!");
+  }
+  display.display();
+}
+#endif
+
 void setup() {
   // Initialize Serial for debugging (non-blocking)
   Serial.begin(115200);
@@ -434,7 +482,7 @@ void transmitMorse(const char* code) {
 }
 
 void sendMorseString(const char* str) {
-  float vbat = readBatteryVoltage(); // Declare vbat once at the start
+  float vbat = readBatteryVoltage();
 
   for (int i = 0; str[i] != '\0'; i++) {
     int index = charToIndex(str[i]);
@@ -450,53 +498,6 @@ void sendMorseString(const char* str) {
     }
   }
   Serial.println(" - Sent");
-
-  // Update OLED display if enabled
-  #ifdef ENABLE_LCD
-  display.clearDisplay();
-  display.setCursor(0, 0);
-  display.print("Freq: ");
-  display.print((unsigned long)(FREQUENCIES[currentFreqIndex] / 1000000));
-  display.print(".");
-  display.print((unsigned long)(FREQUENCIES[currentFreqIndex] % 1000000) / 1000);
-  display.println(" MHz");
-  display.println("TX: BBB DE 3Y0X/KE83");
-  #ifdef ENABLE_GPS
-  if (gpsReceiving) {
-    display.print("Sats: ");
-    display.println(gps.satellites.isValid() ? gps.satellites.value() : 0);
-    if (gps.time.isValid()) {
-      display.print("UTC: ");
-      if (gps.time.hour() < 10) display.print("0");
-      display.print(gps.time.hour());
-      display.print(":");
-      if (gps.time.minute() < 10) display.print("0");
-      display.print(gps.time.minute());
-      display.print(":");
-      if (gps.time.second() < 10) display.print("0");
-      display.println(gps.time.second());
-    }
-    if (gpsConnected && gps.location.isValid()) {
-      String grid = calculateMaidenhead(gps.location.lat(), gps.location.lng());
-      display.print("Grid: ");
-      display.println(grid);
-    } else {
-      display.println("Fix: None");
-    }
-  } else {
-    display.println("GPS: No data");
-  }
-  #else
-  display.println("GPS Disabled");
-  #endif
-  display.print("Batt: ");
-  display.print(vbat, 1);
-  display.println("V");
-  if (vbat < VBAT_THRESHOLD) {
-    display.println("LOW BATTERY!");
-  }
-  display.display();
-  #endif
 
   // Update Serial with GPS and battery status
   #ifdef ENABLE_GPS
@@ -553,6 +554,11 @@ void loop() {
   Serial.print(".");
   Serial.print((unsigned long)(FREQUENCIES[currentFreqIndex] % 1000000) / 1000);
   Serial.println(" MHz");
+
+  #ifdef ENABLE_LCD
+  updateDisplay(readBatteryVoltage()); // Update display before transmission
+  #endif
+
   setFrequency(FREQUENCIES[currentFreqIndex]);
   sendMorseString(MORSE_STRING);
 
