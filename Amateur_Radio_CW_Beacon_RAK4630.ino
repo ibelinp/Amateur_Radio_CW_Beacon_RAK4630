@@ -64,8 +64,8 @@
 
 // CW Configuration Parameters
 #define TX_POWER            22      // dBm
-#define TX_STABILIZATION_DELAY 10   // ms (changed from 25)
-#define WPM                 25      // Words per minute (changed from 20)
+#define TX_STABILIZATION_DELAY 10   // ms
+#define WPM                 25      // Words per minute
 #define UNIT_TIME           (1200 / WPM) // ms
 
 // OLED Configuration
@@ -98,12 +98,12 @@ const int NUM_FREQUENCIES = sizeof(FREQUENCIES) / sizeof(FREQUENCIES[0]);
 int currentFreqIndex = 0;
 
 // Hardcoded Morse string
-const char* MORSE_STRING = "BBB DE 3Y0X/KE83"; // Changed from "BBB DE N4IP / TEST &"
+const char* MORSE_STRING = "BBB DE 3Y0X/KE83";
 
 // Morse code lookup table (A-Z, 0-9, space, special characters)
 const char* morseCode[] = {
   ".-",     // A
-  "...-",   // B
+  "-...",   // B (corrected from ...- to -...)
   "-.-.",   // C
   "-..",    // D
   ".",      // E
@@ -460,7 +460,7 @@ void sendMorseString(const char* str) {
   display.print(".");
   display.print((unsigned long)(FREQUENCIES[currentFreqIndex] % 1000000) / 1000);
   display.println(" MHz");
-  display.println("TX: BBB DE 3Y0X/KE83"); // Updated Morse message
+  display.println("TX: BBB DE 3Y0X/KE83");
   #ifdef ENABLE_GPS
   if (gpsReceiving) {
     display.print("Sats: ");
